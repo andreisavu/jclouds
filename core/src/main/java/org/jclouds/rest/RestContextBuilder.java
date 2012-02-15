@@ -22,9 +22,12 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Predicates.instanceOf;
 import static com.google.common.collect.Iterables.addAll;
 import static com.google.common.collect.Iterables.any;
+import static com.google.common.io.Closeables.closeQuietly;
 import static com.google.inject.Scopes.SINGLETON;
 import static com.google.inject.util.Types.newParameterizedType;
+import static org.jclouds.util.Throwables2.propagateAuthorizationOrOriginalException;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
@@ -38,6 +41,7 @@ import org.jclouds.concurrent.config.ExecutorServiceModule;
 import org.jclouds.http.RequiresHttp;
 import org.jclouds.http.config.ConfiguresHttpCommandExecutorService;
 import org.jclouds.http.config.JavaUrlHttpCommandExecutorServiceModule;
+import org.jclouds.lifecycle.Closer;
 import org.jclouds.lifecycle.config.LifeCycleModule;
 import org.jclouds.logging.config.LoggingModule;
 import org.jclouds.logging.jdk.config.JDKLoggingModule;
@@ -46,6 +50,7 @@ import org.jclouds.rest.config.CredentialStoreModule;
 import org.jclouds.rest.config.RestClientModule;
 import org.jclouds.rest.config.RestModule;
 import org.jclouds.rest.internal.RestContextImpl;
+import org.jclouds.util.Throwables2;
 import org.nnsoft.guice.rocoto.Rocoto;
 import org.nnsoft.guice.rocoto.configuration.ConfigurationModule;
 
@@ -69,7 +74,7 @@ import com.google.inject.TypeLiteral;
  * <p/>
  * If no <code>Module</code>s are specified, the default {@link JDKLoggingModule logging} and
  * {@link JavaUrlHttpCommandExecutorServiceModule http transports} will be installed.
- * 
+ *
  * @author Adrian Cole, Andrew Newdigate
  * @see RestContext
  */
@@ -99,9 +104,9 @@ public class RestContextBuilder<S, A> {
             Properties toBind = new Properties();
             toBind.putAll(checkNotNull(properties, "properties"));
             toBind.putAll(System.getProperties());
-            bindProperties(toBind);            
+            bindProperties(toBind);
          }
-         
+
       }));
       addContextModule(modules);
       addClientModuleIfNotPresent(modules);
@@ -113,7 +118,12 @@ public class RestContextBuilder<S, A> {
       modules.add(new LifeCycleModule());
       modules.add(new BindPropertiesToAnnotations());
       Injector returnVal = Guice.createInjector(Stage.PRODUCTION, modules);
-      returnVal.getInstance(ExecutionList.class).execute();
+      try {
+         returnVal.getInstance(ExecutionList.class).execute();
+      } catch (Exception e) {
+         closeQuietly(returnVal.getInstance(Closer.class));
+         propagateAuthorizationOrOriginalException(e);
+      }
       return returnVal;
    }
 
@@ -247,7 +257,7 @@ public class RestContextBuilder<S, A> {
       }
    }
 
-   @VisibleForTesting 
+   @VisibleForTesting
    protected Properties getProperties() {
       return properties;
    }
